@@ -897,6 +897,11 @@ func (container *Container) startLogging() error {
 		return fmt.Errorf("failed to initialize logging driver: %v", err)
 	}
 
+	const startMessage = `{"type":"start"}`
+	if err := l.Log(&logger.Message{Line: []byte(startMessage), Source: "event"}); err != nil {
+		return fmt.Errorf("Failed to send 'start' event to logging driver: %v", err)
+	}
+
 	copier := logger.NewCopier(map[string]io.Reader{"stdout": container.StdoutPipe(), "stderr": container.StderrPipe()}, l)
 	container.LogCopier = copier
 	copier.Run()

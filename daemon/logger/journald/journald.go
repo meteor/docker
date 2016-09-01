@@ -19,6 +19,7 @@ const name = "journald"
 
 type journald struct {
 	vars    map[string]string // additional variables and values to send to the journal along with the log message
+	eVars   map[string]string // vars, plus an extra one saying DOCKER_EVENT=true
 	readers readerList
 }
 
@@ -82,7 +83,12 @@ func New(info logger.Info) (logger.Logger, error) {
 	for k, v := range extraAttrs {
 		vars[k] = v
 	}
-	return &journald{vars: vars, readers: readerList{readers: make(map[*logger.LogWatcher]*logger.LogWatcher)}}, nil
+
+	eVars := map[string]string{"DOCKER_EVENT": "true"}
+	for k, v := range vars {
+		eVars[k] = v
+	}
+	return &journald{vars: vars, eVars: eVars, readers: readerList{readers: make(map[*logger.LogWatcher]*logger.LogWatcher)}}, nil
 }
 
 // We don't actually accept any options, but we have to supply a callback for
@@ -111,9 +117,19 @@ func (s *journald) Log(msg *logger.Message) error {
 	}
 
 	line := string(msg.Line)
+	source := msg.Source
 	logger.PutMessage(msg)
 
-	if msg.Source == "stderr" {
+	if source == "event" {
+		// Galaxy-specific change! If this is an "event" (container start or stop),
+		// send it with the special DOCKER_EVENT=true field. Also, use a distinct
+		// priority level from stdout/stderr, since different priority levels are
+		// rate limited separately and we don't want a spammy container to cause
+		// journald to drop the stop message.
+		// https://github.com/systemd/systemd/blob/e5e0cffce784b2cf6f57f110cc9c4355f7703200/src/journal/journald-rate-limit.c#L39-L42
+		return journal.Send(line, journal.PriWarning, s.eVars)
+	}
+	if source == "stderr" {
 		return journal.Send(line, journal.PriErr, vars)
 	}
 	return journal.Send(line, journal.PriInfo, vars)
