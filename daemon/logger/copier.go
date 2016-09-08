@@ -3,6 +3,7 @@ package logger
 import (
 	"bytes"
 	"io"
+	"strconv"
 	"sync"
 	"time"
 
@@ -40,6 +41,25 @@ func (c *Copier) Run() {
 		c.copyJobs.Add(1)
 		go c.copySrc(src, w)
 	}
+}
+
+// Ensure that we do not log arbitrarily long error messages when the logger
+// fails. For example, if the logger failed due to the line being too long, we
+// probably don't want to print out the whole thing (where it will be split into
+// many output lines and spam our output).
+func maybeTruncate(in []byte) []byte {
+	const maxLength = 1000
+	if len(in) <= maxLength {
+		return in
+	}
+	var b bytes.Buffer
+	b.Grow(maxLength + 20) // Leave from for "[...]" and a few digits
+	// Note that these functions are all documented to always return nil errors.
+	_, _ = b.Write(in[:maxLength])
+	_, _ = b.WriteString("[...")
+	_, _ = b.WriteString(strconv.Itoa(len(in) - maxLength))
+	_ = b.WriteByte(']')
+	return b.Bytes()
 }
 
 func (c *Copier) copySrc(name string, src io.Reader) {
@@ -87,7 +107,7 @@ func (c *Copier) copySrc(name string, src io.Reader) {
 					msg.Line = append(msg.Line, buf[p:p+q]...)
 
 					if logErr := c.dst.Log(msg); logErr != nil {
-						logrus.Errorf("Failed to log msg %q for logger %s: %s", msg.Line, c.dst.Name(), logErr)
+						logrus.Errorf("Failed to log msg %q for logger %s: %s", maybeTruncate(msg.Line), c.dst.Name(), logErr)
 					}
 				}
 				p += q + 1

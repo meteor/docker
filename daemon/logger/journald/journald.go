@@ -6,7 +6,9 @@ package journald
 
 import (
 	"fmt"
+	"strconv"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/Sirupsen/logrus"
@@ -18,9 +20,10 @@ import (
 const name = "journald"
 
 type journald struct {
-	vars    map[string]string // additional variables and values to send to the journal along with the log message
-	eVars   map[string]string // vars, plus an extra one saying DOCKER_EVENT=true
-	readers readerList
+	vars      map[string]string // additional variables and values to send to the journal along with the log message
+	eVars     map[string]string // vars, plus an extra one saying DOCKER_EVENT=true
+	readers   readerList
+	rateLimit *rateLimit
 }
 
 type readerList struct {
@@ -57,6 +60,39 @@ func sanitizeKeyMod(s string) string {
 	return n
 }
 
+// Returns a rateLimit for the container if appropriate labels are set. Returns
+// nil if labels are not set or cannot be parsed. Logs errors if labels cannot
+// be parsed.
+func newRateLimit(labels map[string]string) *rateLimit {
+	burstLabel, burstExists := labels["com.meteor.galaxy.log-burst"]
+	intervalLabel, intervalExists := labels["com.meteor.galaxy.log-interval"]
+
+	if !burstExists && !intervalExists {
+		return nil
+	}
+	if !burstExists || !intervalExists {
+		logrus.Errorf("only one com.meteor.galaxy.log-* label exists: %v %v",
+			burstExists, intervalExists)
+		return nil
+	}
+
+	burst, err := strconv.Atoi(burstLabel)
+	if err != nil {
+		logrus.Errorf("Couldn't parse com.meteor.galaxy.log-burst '%s': %v",
+			burstLabel, err)
+		return nil
+	}
+
+	interval, err := time.ParseDuration(intervalLabel)
+	if err != nil {
+		logrus.Errorf("Couldn't parse com.meteor.galaxy.log-interval '%s': %v",
+			intervalLabel, err)
+		return nil
+	}
+
+	return &rateLimit{Burst: burst, Interval: interval}
+}
+
 // New creates a journald logger using the configuration passed in on
 // the context.
 func New(info logger.Info) (logger.Logger, error) {
@@ -88,7 +124,13 @@ func New(info logger.Info) (logger.Logger, error) {
 	for k, v := range vars {
 		eVars[k] = v
 	}
-	return &journald{vars: vars, eVars: eVars, readers: readerList{readers: make(map[*logger.LogWatcher]*logger.LogWatcher)}}, nil
+
+	return &journald{
+		vars:      vars,
+		eVars:     eVars,
+		readers:   readerList{readers: make(map[*logger.LogWatcher]*logger.LogWatcher)},
+		rateLimit: newRateLimit(ctx.ContainerLabels),
+	}, nil
 }
 
 // We don't actually accept any options, but we have to supply a callback for
@@ -124,15 +166,37 @@ func (s *journald) Log(msg *logger.Message) error {
 		// Galaxy-specific change! If this is an "event" (container start or stop),
 		// send it with the special DOCKER_EVENT=true field. Also, use a distinct
 		// priority level from stdout/stderr, since different priority levels are
-		// rate limited separately and we don't want a spammy container to cause
-		// journald to drop the stop message.
+		// rate limited separately by journald (though this is undocumented) and we
+		// don't want a spammy container to cause journald to drop the stop message
+		// if our internal rate limiting was ineffective.
 		// https://github.com/systemd/systemd/blob/e5e0cffce784b2cf6f57f110cc9c4355f7703200/src/journal/journald-rate-limit.c#L39-L42
 		return journal.Send(line, journal.PriWarning, s.eVars)
 	}
+
+	// If it's actually from the container, apply rate limiting. Note that we
+	// don't rate limit stdout and stderr separately from each other.
+	if s.rateLimit != nil {
+		allowed, suppressed := s.rateLimit.Check()
+		if !allowed {
+			return nil
+		}
+		if suppressed > 0 {
+			if err := s.sendSuppressedMessage(suppressed); err != nil {
+				logrus.Errorf("Couldn't send suppressed message: %v", err)
+			}
+		}
+	}
+
 	if source == "stderr" {
 		return journal.Send(line, journal.PriErr, vars)
 	}
 	return journal.Send(line, journal.PriInfo, vars)
+}
+
+// Send a DOCKER_EVENT message describing the suppression.
+func (s *journald) sendSuppressedMessage(suppressed int) error {
+	suppressedMessage := fmt.Sprintf(`{"type":"dropped","lines":%d}`, suppressed)
+	return journal.Send(suppressedMessage, journal.PriWarning, s.eVars)
 }
 
 func (s *journald) Name() string {

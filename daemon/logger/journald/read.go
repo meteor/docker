@@ -166,6 +166,13 @@ func (s *journald) Close() error {
 		reader.Close()
 	}
 	s.readers.mu.Unlock()
+
+	// One last end-of-process suppression message.
+	if s.rateLimit != nil {
+		if suppressed := s.rateLimit.Suppressed(); suppressed > 0 {
+			return s.sendSuppressedMessage(suppressed)
+		}
+	}
 	return nil
 }
 
