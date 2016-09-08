@@ -36,11 +36,15 @@ func (daemon *Daemon) StateChanged(id string, e libcontainerd.StateInfo) error {
 		// until all the copying from containerd into StreamConfig occurs (it
 		// matches the s.Add/s.Done in AttachStreams below), only Reset will block
 		// until these streams are copied into the LogDriver. Reset will set
-		// c.LogDriver to nil, so we grab it first. It will also call
-		// c.LogDriver.Close(), but for journald, Close only closes state related to
-		// reading from the journal (for `docker logs`, etc), not writing to it, so
-		// it's OK for us to use it after Close. (It's also OK for us to grab this
-		// field because we've called c.Lock above.)
+		// c.LogDriver to nil, so we grab it first.
+		//
+		// It will also call c.LogDriver.Close(), but for journald, Close only
+		// closes state related to reading from the journal (for `docker logs`,
+		// etc), not writing to it, so it's OK for us to use it after Close. (It
+		// also prints our final suppression message, if any.)
+		//
+		// It's also OK for us to grab this field because we've called c.Lock
+		// above.
 		logDriver := c.LogDriver
 
 		c.Reset(false)
