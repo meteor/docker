@@ -34,6 +34,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"unsafe"
 )
 
 // Priority of a journal message
@@ -50,11 +51,19 @@ const (
 	PriDebug
 )
 
-var conn net.Conn
+var (
+	conn *net.UnixConn
+
+	journaldPath = []int8{
+		'/', 'r', 'u', 'n', '/', 's', 'y', 's', 't', 'e', 'm', 'd', '/', 'j', 'o', 'u', 'r', 'n', 'a', 'l', '/', 's', 'o', 'c', 'k', 'e', 't',
+	}
+)
 
 func init() {
 	var err error
-	conn, err = net.Dial("unixgram", "/run/systemd/journal/socket")
+	var autobind *net.UnixAddr
+	autobind, err = net.ResolveUnixAddr("unixgram", "")
+	conn, err = net.ListenUnixgram("unixgram", autobind)
 	if err != nil {
 		conn = nil
 	}
@@ -77,6 +86,10 @@ func Send(message string, priority Priority, vars map[string]string) error {
 		return journalError("could not connect to journald socket")
 	}
 
+	socketAddr, err := net.ResolveUnixAddr("unixgram", "/run/systemd/journal/socket")
+	if err != nil {
+		return journalError(err.Error())
+	}
 	data := new(bytes.Buffer)
 	appendVariable(data, "PRIORITY", strconv.Itoa(int(priority)))
 	appendVariable(data, "MESSAGE", message)
@@ -84,7 +97,7 @@ func Send(message string, priority Priority, vars map[string]string) error {
 		appendVariable(data, k, v)
 	}
 
-	_, err := io.Copy(conn, data)
+	_, _, err = conn.WriteMsgUnix(data.Bytes(), nil, socketAddr)
 	if err != nil && isSocketSpaceError(err) {
 		file, err := tempFd()
 		if err != nil {
@@ -97,12 +110,34 @@ func Send(message string, priority Priority, vars map[string]string) error {
 
 		rights := syscall.UnixRights(int(file.Fd()))
 
-		/* this connection should always be a UnixConn, but better safe than sorry */
-		unixConn, ok := conn.(*net.UnixConn)
-		if !ok {
-			return journalError("can't send file through non-Unix connection")
+		sa := syscall.RawSockaddrUnix{
+			Family: syscall.AF_UNIX,
 		}
-		unixConn.WriteMsgUnix([]byte{}, rights, nil)
+		copy(sa.Path[:], journaldPath)
+
+		var msg syscall.Msghdr
+		msg.Name = (*byte)(unsafe.Pointer(&sa))
+		// Namelen is family len(uint16) (2 bytes) + len(path) + \0 (1 byte)
+		msg.Namelen = uint32(3 + len(journaldPath))
+		msg.Control = (*byte)(unsafe.Pointer(&rights[0]))
+		msg.SetControllen(len(rights))
+
+		f, err := conn.File()
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+
+		_, _, errno := syscall.Syscall(
+			syscall.SYS_SENDMSG,
+			f.Fd(),
+			uintptr(unsafe.Pointer(&msg)),
+			0,
+		)
+
+		if errno != 0 {
+			return errno
+		}
 	} else if err != nil {
 		return journalError(err.Error())
 	}
@@ -151,12 +186,12 @@ func isSocketSpaceError(err error) bool {
 		return false
 	}
 
-	sysErr, ok := opErr.Err.(syscall.Errno)
+	sysErr, ok := opErr.Err.(*os.SyscallError)
 	if !ok {
 		return false
 	}
 
-	return sysErr == syscall.EMSGSIZE || sysErr == syscall.ENOBUFS
+	return sysErr.Err == syscall.EMSGSIZE || sysErr.Err == syscall.ENOBUFS
 }
 
 func tempFd() (*os.File, error) {
