@@ -20,10 +20,11 @@ import (
 const name = "journald"
 
 type journald struct {
-	vars      map[string]string // additional variables and values to send to the journal along with the log message
-	eVars     map[string]string // vars, plus an extra one saying DOCKER_EVENT=true
-	readers   readerList
-	rateLimit *rateLimit
+	vars            map[string]string // additional variables and values to send to the journal along with the log message
+	eVars           map[string]string // vars, plus an extra one saying DOCKER_EVENT=true
+	readers         readerList
+	stdoutRateLimit *rateLimit
+	stderrRateLimit *rateLimit
 }
 
 type readerList struct {
@@ -126,10 +127,11 @@ func New(info logger.Info) (logger.Logger, error) {
 	}
 
 	return &journald{
-		vars:      vars,
-		eVars:     eVars,
-		readers:   readerList{readers: make(map[*logger.LogWatcher]*logger.LogWatcher)},
-		rateLimit: newRateLimit(ctx.ContainerLabels),
+		vars:            vars,
+		eVars:           eVars,
+		readers:         readerList{readers: make(map[*logger.LogWatcher]*logger.LogWatcher)},
+		stdoutRateLimit: newRateLimit(ctx.ContainerLabels),
+		stderrRateLimit: newRateLimit(ctx.ContainerLabels),
 	}, nil
 }
 
@@ -173,10 +175,18 @@ func (s *journald) Log(msg *logger.Message) error {
 		return journal.Send(line, journal.PriWarning, s.eVars)
 	}
 
-	// If it's actually from the container, apply rate limiting. Note that we
-	// don't rate limit stdout and stderr separately from each other.
-	if s.rateLimit != nil {
-		allowed, suppressed := s.rateLimit.Check()
+	if source == "stderr" {
+		return s.rateLimitAndSend(line, s.stderrRateLimit, journal.PriErr)
+	}
+	return s.rateLimitAndSend(line, s.stdoutRateLimit, journal.PriInfo)
+}
+
+func (s *journald) rateLimitAndSend(line string, rl *rateLimit, p journal.Priority) error {
+	// If it's actually from the container, apply rate limiting. Note that we rate
+	// limit stdout and stderr separately from each other so that errors can get
+	// through if we're spamming stdout.
+	if rl != nil {
+		allowed, suppressed := rl.Check()
 		if !allowed {
 			return nil
 		}
@@ -187,10 +197,7 @@ func (s *journald) Log(msg *logger.Message) error {
 		}
 	}
 
-	if source == "stderr" {
-		return journal.Send(line, journal.PriErr, vars)
-	}
-	return journal.Send(line, journal.PriInfo, vars)
+	return journal.Send(line, p, s.vars)
 }
 
 // Send a DOCKER_EVENT message describing the suppression.

@@ -168,12 +168,20 @@ func (s *journald) Close() error {
 	s.readers.mu.Unlock()
 
 	// One last end-of-process suppression message.
-	if s.rateLimit != nil {
-		if suppressed := s.rateLimit.Suppressed(); suppressed > 0 {
-			return s.sendSuppressedMessage(suppressed)
+	s.finalSuppressMessage(s.stdoutRateLimit)
+	s.finalSuppressMessage(s.stderrRateLimit)
+	return nil
+}
+
+func (s *journald) finalSuppressMessage(rl *rateLimit) {
+	if rl == nil {
+		return
+	}
+	if suppressed := rl.Suppressed(); suppressed > 0 {
+		if err := s.sendSuppressedMessage(suppressed); err != nil {
+			logrus.Errorf("Couldn't send final suppressed message: %v", err)
 		}
 	}
-	return nil
 }
 
 func (s *journald) drainJournal(logWatcher *logger.LogWatcher, config logger.ReadConfig, j *C.sd_journal, oldCursor *C.char) *C.char {
