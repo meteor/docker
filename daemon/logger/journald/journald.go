@@ -25,6 +25,7 @@ type journald struct {
 	readers         readerList
 	stdoutRateLimit *rateLimit
 	stderrRateLimit *rateLimit
+	maxLineLength   int
 }
 
 type readerList struct {
@@ -109,10 +110,21 @@ func New(ctx logger.Context) (logger.Logger, error) {
 		eVars[k] = v
 	}
 
+	maxLineLength := 4096
+	if mllLabel, ok := ctx.ContainerLabels["com.meteor.galaxy.max-log-line-length"]; ok {
+		if mll, err := strconv.Atoi(mllLabel); err != nil {
+			logrus.Errorf("Couldn't parse com.meteor.galaxy.max-log-line-length '%s': %v",
+				mllLabel, err)
+		} else {
+			maxLineLength = mll
+		}
+	}
+
 	return &journald{
 		vars:            vars,
 		eVars:           eVars,
 		readers:         readerList{readers: make(map[*logger.LogWatcher]*logger.LogWatcher)},
+		maxLineLength:   maxLineLength,
 		stdoutRateLimit: newRateLimit(ctx.ContainerLabels),
 		stderrRateLimit: newRateLimit(ctx.ContainerLabels),
 	}, nil
@@ -167,7 +179,14 @@ func (s *journald) rateLimitAndSend(msg *logger.Message, rl *rateLimit, p journa
 		}
 	}
 
-	return journal.Send(string(msg.Line), p, s.vars)
+	var line string
+	if len(msg.Line) > s.maxLineLength {
+		line = string(msg.Line[:s.maxLineLength]) + " (truncated)"
+	} else {
+		line = string(msg.Line)
+	}
+
+	return journal.Send(line, p, s.vars)
 }
 
 // Send a DOCKER_EVENT message describing the suppression.
