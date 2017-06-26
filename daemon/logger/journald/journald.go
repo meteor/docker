@@ -15,14 +15,17 @@ import (
 	"github.com/coreos/go-systemd/journal"
 	"github.com/docker/docker/daemon/logger"
 	"github.com/docker/docker/daemon/logger/loggerutils"
+	multierror "github.com/hashicorp/go-multierror"
 )
 
 const name = "journald"
 
 type journald struct {
-	vars            map[string]string // additional variables and values to send to the journal along with the log message
-	eVars           map[string]string // vars, plus an extra one saying DOCKER_EVENT=true
-	readers         readerList
+	vars    map[string]string // additional variables and values to send to the journal along with the log message
+	eVars   map[string]string // vars, plus an extra one saying DOCKER_EVENT=true
+	readers readerList
+
+	rateLimitMu     sync.Mutex
 	stdoutRateLimit *rateLimit
 	stderrRateLimit *rateLimit
 }
@@ -130,8 +133,8 @@ func New(info logger.Info) (logger.Logger, error) {
 		vars:            vars,
 		eVars:           eVars,
 		readers:         readerList{readers: make(map[*logger.LogWatcher]*logger.LogWatcher)},
-		stdoutRateLimit: newRateLimit(ctx.ContainerLabels),
-		stderrRateLimit: newRateLimit(ctx.ContainerLabels),
+		stdoutRateLimit: newRateLimit(info.ContainerLabels),
+		stderrRateLimit: newRateLimit(info.ContainerLabels),
 	}, nil
 }
 
@@ -149,6 +152,12 @@ func validateLogOpt(cfg map[string]string) error {
 		}
 	}
 	return nil
+}
+
+type msg struct {
+	line     string
+	priority journal.Priority
+	vars     map[string]string
 }
 
 func (s *journald) Log(msg *logger.Message) error {
@@ -175,35 +184,89 @@ func (s *journald) Log(msg *logger.Message) error {
 		return journal.Send(line, journal.PriWarning, s.eVars)
 	}
 
-	if source == "stderr" {
-		return s.rateLimitAndSend(line, s.stderrRateLimit, journal.PriErr)
-	}
-	return s.rateLimitAndSend(line, s.stdoutRateLimit, journal.PriInfo)
-}
-
-func (s *journald) rateLimitAndSend(line string, rl *rateLimit, p journal.Priority) error {
-	// If it's actually from the container, apply rate limiting. Note that we rate
-	// limit stdout and stderr separately from each other so that errors can get
-	// through if we're spamming stdout.
-	if rl != nil {
-		allowed, suppressed := rl.Check()
-		if !allowed {
-			return nil
-		}
-		if suppressed > 0 {
-			if err := s.sendSuppressedMessage(suppressed); err != nil {
-				logrus.Errorf("Couldn't send suppressed message: %v", err)
-			}
+	var errs error
+	for _, msg := range s.msgsForLine(line, source, vars) {
+		if err := journal.Send(msg.line, msg.priority, msg.vars); err != nil {
+			errs = multierror.Append(errs, err)
 		}
 	}
-
-	return journal.Send(line, p, s.vars)
+	return errs
 }
 
-// Send a DOCKER_EVENT message describing the suppression.
-func (s *journald) sendSuppressedMessage(suppressed int) error {
-	suppressedMessage := fmt.Sprintf(`{"type":"dropped","lines":%d}`, suppressed)
-	return journal.Send(suppressedMessage, journal.PriWarning, s.eVars)
+// Returns the list of messages that need to be sent to the journal: probably
+// just one describing the message passed in, but maybe messages mentioning that
+// lines have been dropped, or missing the one for the message because it should
+// be dropped.
+//
+// This function does not actually send the messages and shouldn't block inside
+// the mutex.
+func (s *journald) msgsForLine(line, source string, vars map[string]string) []*msg {
+	// This method is accessed by two goroutines, one for stdout and one for stderr.
+	s.rateLimitMu.Lock()
+	defer s.rateLimitMu.Unlock()
+
+	var msgs []*msg
+
+	// Check rate limits on *both* streams.  We check on both to help the
+	// following situation:
+	//
+	// - Tons of quick writes to stdout that get rate limited
+	// - A long time passes, during which there are periodic non-rate-limited
+	//   writes to stderr
+	// - Eventually, another write to stdout
+	//
+	// We want the rate limit message to show up as soon as possible, but for
+	// simplicity we only print messages when a method is invoked on this driver
+	// (Log or Close) rather than trying to manage extra timer
+	// goroutines. Checking both rate limits here means that we'll write the
+	// "stdout got rate limited" message as soon as the first message to stderr
+	// (after the interval expires) happens.
+	//
+	// Note that it's OK to call MaybeFinishInterval and CanSend on nil pointers.
+	if suppressed := s.stdoutRateLimit.MaybeFinishInterval(); suppressed != 0 {
+		msgs = append(msgs, &msg{s.makeSuppressedMessage(suppressed, "stdout"), journal.PriWarning, s.eVars})
+	}
+	if suppressed := s.stderrRateLimit.MaybeFinishInterval(); suppressed != 0 {
+		msgs = append(msgs, &msg{s.makeSuppressedMessage(suppressed, "stderr"), journal.PriWarning, s.eVars})
+	}
+
+	if source == "stderr" && s.stderrRateLimit.CanSend() {
+		msgs = append(msgs, &msg{line, journal.PriErr, vars})
+	}
+	if source == "stdout" && s.stdoutRateLimit.CanSend() {
+		msgs = append(msgs, &msg{line, journal.PriInfo, vars})
+	}
+
+	return msgs
+}
+
+// Send a DOCKER_EVENT message describing the suppression. 'source' must be safe
+// for unquoted insertion into a JSON string.
+func (s *journald) sendSuppressedMessage(suppressed int, source string) error {
+	return journal.Send(s.makeSuppressedMessage(suppressed, source), journal.PriWarning, s.eVars)
+}
+
+// Returns the message used for a DOCKER_EVENT message describing the
+// suppression. 'source' must be safe for unquoted insertion into a JSON string.
+func (s *journald) makeSuppressedMessage(suppressed int, source string) string {
+	return fmt.Sprintf(`{"type":"dropped","lines":%d,"source":"%s"}`, suppressed, source)
+}
+
+func (s *journald) finalSuppressMessage(rl *rateLimit, source string) {
+	if rl == nil {
+		return
+	}
+	s.rateLimitMu.Lock()
+	suppressed := rl.Suppressed()
+	s.rateLimitMu.Unlock()
+
+	if suppressed == 0 {
+		return
+	}
+
+	if err := s.sendSuppressedMessage(suppressed, source); err != nil {
+		logrus.Errorf("Couldn't send final suppressed message: %v", err)
+	}
 }
 
 func (s *journald) Name() string {

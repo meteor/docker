@@ -22,41 +22,66 @@ type rateLimit struct {
 	suppressed int
 }
 
-// Check returns a boolean saying whether or not a message should be allowed
-// now, and the number of messages that were suppressed before this message.
-func (r *rateLimit) Check() (bool, int) {
-	now := time.Now()
+// CanSend returns true if a message should be allowed now. It assumes we very recently
+// called MaybeFinishInterval on it.
+func (r *rateLimit) CanSend() bool {
+	// If we aren't rate limiting, we can always send.
+	if r == nil {
+		return true
+	}
 
-	// Is this the first time? Start the interval.
+	// Are we not in an interval? Start one.  Note that in this case we must
+	// always have r.suppressed = r.num = 0, because that's how a rateLimit starts
+	// and that's what MaybeFinishInterval resets it to when it zeros r.begin.
 	if r.begin.IsZero() {
-		r.suppressed = 0
-		r.num = 1
-		r.begin = now
-		return true, 0
+		r.begin = time.Now()
 	}
 
-	// Have we left the previous tracked interval? Start a new interval, and maybe
-	// report suppression.
-	if r.begin.Add(r.Interval).Before(now) {
-		previousSuppressed := r.suppressed
-		r.suppressed = 0
-		r.num = 1
-		r.begin = now
-		return true, previousSuppressed
-	}
-
-	// Within the interval, but within the burst limit?
+	// Now we're in an interval. Because the caller just called
+	// MaybeFinishInterval, the interval isn't done yet. So just check to see if
+	// we have room for another message or not.
 	if r.num < r.Burst {
 		r.num++
-		return true, 0
+		return true
 	}
 
 	// Too many within the interval!
 	r.suppressed++
-	return false, 0
+	return false
 }
 
-// Returns the number of currently suppressed messages.
+// MaybeFinishInterval checks to see if the rateLimit has left its rate-limiting
+// interval. If so, it resets the count of suppressed messages and tells you how
+// many have been suppressed. It doesn't tell you if you should rate limit right
+// now.
+func (r *rateLimit) MaybeFinishInterval() int {
+	// If we aren't rate limiting, we never suppress.
+	if r == nil {
+		return 0
+	}
+
+	// We can only be in an interval if r.begin is non-zero.
+	if r.begin.IsZero() {
+		return 0
+	}
+
+	// If we're still in the interval, it's not time to send a dropped-lines message yet.
+	if !r.begin.Add(r.Interval).Before(time.Now()) {
+		return 0
+	}
+
+	// We have left an interval, so let's send a dropped-lines message and
+	// register that we're no longer in an interval.
+	previousSuppressed := r.suppressed
+	r.suppressed = 0
+	r.num = 0
+	r.begin = time.Time{}
+	return previousSuppressed
+}
+
+// Returns the number of currently suppressed messages. It doesn't make a
+// difference if the interval has expired. Intended for use at the end of a
+// stream.
 func (r *rateLimit) Suppressed() int {
 	return r.suppressed
 }
