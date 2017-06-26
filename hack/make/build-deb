@@ -34,8 +34,9 @@ set -e
 	debMaintainer="$(awk -F ': ' '$1 == "Maintainer" { print $2; exit }' hack/make/.build-deb/control)"
 	debDate="$(date --rfc-2822)"
 
-	# if go-md2man is available, pre-generate the man pages
-	make manpages
+        # XXX mdg: make manpages was failing, and we don't need them.
+	# # if go-md2man is available, pre-generate the man pages
+	# make manpages
 
 	builderDir="contrib/builder/deb/${PACKAGE_ARCH}"
 	pkgs=( $(find "${builderDir}/"*/ -type d) )
