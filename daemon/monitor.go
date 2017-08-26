@@ -62,12 +62,14 @@ func (daemon *Daemon) StateChanged(id string, e libcontainerd.StateInfo) error {
 
 		c.Reset(false)
 
-		// Now that we've copied everything into logDriver, send one last message.
-		stopMessage := fmt.Sprintf(
-			`{"type":"stop","exitCode":%d,"oomKilled":%v}`, e.ExitCode, e.OOMKilled)
-		if err := logDriver.Log(&logger.Message{Line: []byte(stopMessage), Source: "event"}); err != nil {
-			// At least the error will show up in journald without the appropriate tags...
-			logrus.Errorf("Failed to send 'stop' event to logging driver: %v", err)
+		if logDriver != nil {
+			// Now that we've copied everything into logDriver, send one last message.
+			stopMessage := fmt.Sprintf(
+				`{"type":"stop","exitCode":%d,"oomKilled":%v}`, e.ExitCode, e.OOMKilled)
+			if err := logDriver.Log(&logger.Message{Line: []byte(stopMessage), Source: "event"}); err != nil {
+				// At least the error will show up in journald without the appropriate tags...
+				logrus.Errorf("Failed to send 'stop' event to logging driver: %v", err)
+			}
 		}
 
 		restart, wait, err := c.RestartManager().ShouldRestart(e.ExitCode, c.HasBeenManuallyStopped, time.Since(c.StartedAt))
