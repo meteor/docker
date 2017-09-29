@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"github.com/docker/engine-api/types"
 	"github.com/docker/engine-api/types/versions"
 	"github.com/gorilla/mux"

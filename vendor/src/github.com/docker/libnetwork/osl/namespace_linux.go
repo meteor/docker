@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/docker/docker/pkg/reexec"
 	"github.com/docker/libnetwork/ns"
 	"github.com/docker/libnetwork/types"

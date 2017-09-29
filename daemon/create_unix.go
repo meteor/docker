@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/pkg/stringid"
 	containertypes "github.com/docker/engine-api/types/container"

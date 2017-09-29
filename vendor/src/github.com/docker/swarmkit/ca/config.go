@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	cfconfig "github.com/cloudflare/cfssl/config"
 	"github.com/docker/distribution/digest"
 	"github.com/docker/swarmkit/api"

@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/daemon/caps"
 	"github.com/docker/docker/libcontainerd"

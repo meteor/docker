@@ -3,7 +3,7 @@ package hcsshim
 import (
 	"encoding/json"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 )
 
 // ComputeSystemProperties is a struct describing the returned properties.

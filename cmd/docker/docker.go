@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"github.com/docker/docker/api/client"
 	"github.com/docker/docker/cli"
 	"github.com/docker/docker/cli/cobraadaptor"

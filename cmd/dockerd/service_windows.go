@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	flag "github.com/docker/docker/pkg/mflag"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"

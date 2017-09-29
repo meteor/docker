@@ -3,7 +3,7 @@ package libnetwork
 import (
 	"fmt"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/docker/libkv/store/boltdb"
 	"github.com/docker/libkv/store/consul"
 	"github.com/docker/libkv/store/etcd"

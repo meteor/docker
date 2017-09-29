@@ -3,7 +3,7 @@ package exec
 import (
 	"fmt"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"github.com/docker/swarmkit/api"
 	"github.com/docker/swarmkit/log"
 	"golang.org/x/net/context"

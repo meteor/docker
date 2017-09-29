@@ -1,6 +1,6 @@
 package events
 
-import "github.com/Sirupsen/logrus"
+import "github.com/sirupsen/logrus"
 
 // Broadcaster sends events to multiple, reliable Sinks. The goal of this
 // component is to dispatch events to configured endpoints. Reliability can be

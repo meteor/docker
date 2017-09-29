@@ -9,7 +9,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/errors"
 	"github.com/docker/docker/libcontainerd"

@@ -8,7 +8,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"github.com/docker/docker/container"
 	"github.com/docker/docker/daemon/network"
 	derr "github.com/docker/docker/errors"

@@ -9,7 +9,7 @@ import (
 	"path"
 	"path/filepath"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/docker/libnetwork/etchosts"
 	"github.com/docker/libnetwork/resolvconf"
 	"github.com/docker/libnetwork/types"

@@ -3,7 +3,7 @@ package client
 import (
 	"encoding/json"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"github.com/docker/notary"
 	tuf "github.com/docker/notary/tuf"
 	"github.com/docker/notary/tuf/data"

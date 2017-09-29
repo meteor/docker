@@ -19,7 +19,7 @@ import (
 	registrytypes "github.com/docker/engine-api/types/registry"
 	"github.com/gorilla/mux"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 )
 
 var (

@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/docker/docker/pkg/reexec"
 	"github.com/docker/libnetwork/iptables"
 	"github.com/vishvananda/netns"

@@ -1,7 +1,7 @@
 package hcsshim
 
 import (
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"syscall"
 	"time"
 )

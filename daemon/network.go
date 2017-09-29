@@ -5,7 +5,7 @@ import (
 	"net"
 	"strings"
 
-	"github.com/Sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	clustertypes "github.com/docker/docker/daemon/cluster/provider"
 	"github.com/docker/docker/errors"
 	"github.com/docker/docker/runconfig"
